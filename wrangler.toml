@@ -1,0 +1,3 @@
+name = "iframe-extractor"
+main = "dist/index.js"
+compatibility_date = "2023-11-21"
