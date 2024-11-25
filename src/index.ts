@@ -11,13 +11,27 @@ class IframeExtractor {
   }
 
   element(element: Element) {
+    // 获取 src 和 data-src 属性
     const src = element.getAttribute('src');
+    const dataSrc = element.getAttribute('data-src');
+
+    // 处理 src 属性
     if (src) {
       try {
         const absoluteUrl = new URL(src, this.baseUrl).href;
         this.iframes.push(absoluteUrl);
       } catch (e) {
-        console.error(`Invalid URL: ${src}`);
+        console.error(`Invalid URL in src: ${src}`);
+      }
+    }
+
+    // 处理 data-src 属性
+    if (dataSrc) {
+      try {
+        const absoluteUrl = new URL(dataSrc, this.baseUrl).href;
+        this.iframes.push(absoluteUrl);
+      } catch (e) {
+        console.error(`Invalid URL in data-src: ${dataSrc}`);
       }
     }
   }
@@ -25,18 +39,42 @@ class IframeExtractor {
 
 async function extractIframes(url: string): Promise<string[]> {
   try {
-    const response = await fetch(url);
+    console.log(`Fetching URL: ${url}`);
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': url,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    console.log(`Response status: ${response.status}`);
+    
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const extractor = new IframeExtractor(url);
-    const rewriter = new HTMLRewriter()
-      .on('iframe', extractor);
-
-    await rewriter.transform(response).text();
+    const text = await response.text();
+    console.log(`Page content length: ${text.length}`);
     
-    return extractor.iframes;
+    // 使用正则表达式直接从 HTML 中提取 iframe URL
+    const iframeRegex = /<iframe[^>]*(?:src|data-src)=["']([^"']+)["'][^>]*>/gi;
+    const matches = text.matchAll(iframeRegex);
+    const urls = [];
+    
+    for (const match of matches) {
+      try {
+        const iframeUrl = new URL(match[1], url).href;
+        urls.push(iframeUrl);
+        console.log(`Found iframe URL: ${iframeUrl}`);
+      } catch (e) {
+        console.error(`Invalid URL found: ${match[1]}`);
+      }
+    }
+
+    console.log(`Found total iframes: ${urls.length}`);
+    return urls;
   } catch (error) {
     console.error('Error extracting iframes:', error);
     throw error;
@@ -46,7 +84,6 @@ async function extractIframes(url: string): Promise<string[]> {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     try {
-      // 从请求 URL 中获取目标 URL
       const url = new URL(request.url);
       const targetUrl = url.searchParams.get('url');
       
@@ -57,14 +94,16 @@ export default {
         });
       }
 
-      // 提取 iframe
+      console.log(`Processing request for URL: ${targetUrl}`);
       const iframes = await extractIframes(targetUrl);
       
-      // 返回结果
-      return new Response(JSON.stringify({
+      const response = {
         url: targetUrl,
-        iframes: iframes
-      }), {
+        iframes: iframes,
+        timestamp: new Date().toISOString()
+      };
+
+      return new Response(JSON.stringify(response, null, 2), {
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*'
@@ -72,8 +111,10 @@ export default {
       });
       
     } catch (error) {
+      console.error('Error in fetch handler:', error);
       return new Response(JSON.stringify({
-        error: error instanceof Error ? error.message : 'An unknown error occurred'
+        error: error instanceof Error ? error.message : 'An unknown error occurred',
+        timestamp: new Date().toISOString()
       }), {
         status: 500,
         headers: {
